@@ -20,6 +20,8 @@ pub struct AppConfig {
 pub struct ModelRoute {
     pub name: String,
     pub upstream: String,
+    #[serde(default)]
+    pub kind: Option<ModelKind>,
     pub min_complexity: Option<u8>,
     pub max_complexity: Option<u8>,
 }
@@ -51,7 +53,25 @@ impl AppConfig {
         Ok(config)
     }
 
-    pub fn select_model(&self, complexity_score: u8) -> Option<&ModelRoute> {
+    pub fn select_model(&self, complexity_score: u8, code_prompt: bool) -> Option<&ModelRoute> {
+        if code_prompt {
+            if let Some(model) = self.find_preferred(complexity_score, ModelKind::Code) {
+                return Some(model);
+            }
+        }
+
+        if complexity_score >= 3 {
+            if let Some(model) = self.find_preferred(complexity_score, ModelKind::Reasoning) {
+                return Some(model);
+            }
+        }
+
+        if complexity_score <= 2 {
+            if let Some(model) = self.find_preferred(complexity_score, ModelKind::Fast) {
+                return Some(model);
+            }
+        }
+
         self.models
             .iter()
             .find(|model| model.matches_complexity(complexity_score))
@@ -85,6 +105,21 @@ impl AppConfig {
 
         Ok(())
     }
+
+    fn find_preferred(&self, complexity_score: u8, kind: ModelKind) -> Option<&ModelRoute> {
+        self.models
+            .iter()
+            .find(|model| model.matches_kind(kind) && model.matches_complexity(complexity_score))
+            .or_else(|| self.models.iter().find(|model| model.matches_kind(kind)))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelKind {
+    Fast,
+    Code,
+    Reasoning,
 }
 
 impl ModelRoute {
@@ -124,6 +159,21 @@ impl ModelRoute {
 
         Ok(())
     }
+
+    fn matches_kind(&self, kind: ModelKind) -> bool {
+        if self.kind == Some(kind) {
+            return true;
+        }
+
+        let name = self.name.to_ascii_lowercase();
+        match kind {
+            ModelKind::Fast => name.contains("fast") || name.contains("small"),
+            ModelKind::Code => name.contains("code") || name.contains("coder"),
+            ModelKind::Reasoning => {
+                name.contains("reason") || name.contains("deep") || name.contains("large")
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -160,10 +210,27 @@ fn default_listen() -> String {
 }
 
 fn default_models() -> Vec<ModelRoute> {
-    vec![ModelRoute {
-        name: "fast".to_string(),
-        upstream: DEFAULT_LOCAL_UPSTREAM.to_string(),
-        min_complexity: None,
-        max_complexity: None,
-    }]
+    vec![
+        ModelRoute {
+            name: "fast".to_string(),
+            upstream: DEFAULT_LOCAL_UPSTREAM.to_string(),
+            kind: Some(ModelKind::Fast),
+            min_complexity: None,
+            max_complexity: Some(2),
+        },
+        ModelRoute {
+            name: "code".to_string(),
+            upstream: DEFAULT_LOCAL_UPSTREAM.to_string(),
+            kind: Some(ModelKind::Code),
+            min_complexity: None,
+            max_complexity: None,
+        },
+        ModelRoute {
+            name: "reasoning".to_string(),
+            upstream: DEFAULT_LOCAL_UPSTREAM.to_string(),
+            kind: Some(ModelKind::Reasoning),
+            min_complexity: Some(3),
+            max_complexity: None,
+        },
+    ]
 }

@@ -1,11 +1,7 @@
 Add provider presets for local backends
 Support ollama, llama.cpp, vllm, maybe lmstudio, all local only.
 
-Make routing smarter
-Instead of just “pressure true/false”, route between local models:
-small fast model
-code model
-large reasoning model
+
 
 Add real tokenizer support in main path
 Current main uses whitespace count. Wire back tokenizers so scoring is less cave math.

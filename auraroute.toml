@@ -3,9 +3,16 @@ listen = "127.0.0.1:8080"
 [[models]]
 name = "fast"
 upstream = "http://localhost:11434/v1/chat/completions"
+kind = "fast"
 max_complexity = 2
 
 [[models]]
-name = "deep"
+name = "code"
 upstream = "http://localhost:11435/v1/chat/completions"
+kind = "code"
+
+[[models]]
+name = "reasoning"
+upstream = "http://localhost:11436/v1/chat/completions"
+kind = "reasoning"
 min_complexity = 3

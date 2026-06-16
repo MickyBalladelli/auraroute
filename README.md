@@ -17,7 +17,7 @@ It is designed to sit between tools like Cline and local LLM backends such as Ol
 - Extracts user prompt text
 - Estimates prompt complexity from token count, code syntax density, and architecture keywords
 - Reads local resource state with a safe VRAM mock fallback
-- Routes low-complexity requests to local Ollama-compatible upstream
+- Routes between fast, code, and reasoning local model upstreams
 - Keeps all requests on local LLM infrastructure
 - Streams upstream responses back as Axum SSE without buffering the full response
 - Enables permissive CORS for localhost tool integrations
@@ -74,11 +74,18 @@ listen = "127.0.0.1:8080"
 [[models]]
 name = "fast"
 upstream = "http://localhost:11434/v1/chat/completions"
+kind = "fast"
 max_complexity = 2
 
 [[models]]
-name = "deep"
+name = "code"
 upstream = "http://localhost:11435/v1/chat/completions"
+kind = "code"
+
+[[models]]
+name = "reasoning"
+upstream = "http://localhost:11436/v1/chat/completions"
+kind = "reasoning"
 min_complexity = 3
 ```
 
@@ -87,6 +94,14 @@ Config path override:
 ```bash
 AURAROUTE_CONFIG=/path/to/auraroute.toml cargo run
 ```
+
+`kind` can be `fast`, `code`, or `reasoning`.
+
+Routing preference:
+
+- code-looking prompts go to `kind = "code"`
+- complexity `1..=2` goes to `kind = "fast"`
+- complexity `3..=5` goes to `kind = "reasoning"`
 
 `AURAROUTE_LISTEN` overrides `listen`. `AURAROUTE_LOCAL_UPSTREAM` overrides the first configured model upstream.
 

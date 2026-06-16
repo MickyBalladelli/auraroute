@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 use regex::Regex;
 
 static CODE_SYNTAX_RE: OnceLock<Result<Regex, regex::Error>> = OnceLock::new();
+static CODE_BLOCK_RE: OnceLock<Result<Regex, regex::Error>> = OnceLock::new();
 static ARCHITECTURE_KEYWORD_RE: OnceLock<Result<Regex, regex::Error>> = OnceLock::new();
 
 pub fn calculate_complexity(prompt: &str, token_count: usize) -> u8 {
@@ -21,6 +22,16 @@ pub fn calculate_complexity(prompt: &str, token_count: usize) -> u8 {
     }
 
     score.clamp(1, 5)
+}
+
+pub fn looks_like_code(prompt: &str) -> bool {
+    has_code_block(prompt) || has_dense_code_syntax(prompt)
+}
+
+fn has_code_block(prompt: &str) -> bool {
+    compiled_code_block_regex()
+        .map(|regex| regex.is_match(prompt))
+        .unwrap_or(false)
 }
 
 fn has_dense_code_syntax(prompt: &str) -> bool {
@@ -43,6 +54,13 @@ fn has_architecture_keywords(prompt: &str) -> bool {
     compiled_architecture_keyword_regex()
         .map(|regex| regex.is_match(prompt))
         .unwrap_or(false)
+}
+
+fn compiled_code_block_regex() -> Option<&'static Regex> {
+    CODE_BLOCK_RE
+        .get_or_init(|| Regex::new(r"(?m)(```|~~~|\b(fn|async|impl|trait|struct|enum|use)\b)"))
+        .as_ref()
+        .ok()
 }
 
 fn compiled_code_syntax_regex() -> Option<&'static Regex> {

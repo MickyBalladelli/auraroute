@@ -38,6 +38,7 @@ struct ModelHealth {
     upstream: String,
     min_complexity: Option<u8>,
     max_complexity: Option<u8>,
+    kind: Option<crate::config::ModelKind>,
     reachable: bool,
     status_code: Option<u16>,
     error: Option<String>,
@@ -57,6 +58,7 @@ struct ModelDescriptor {
     upstream: String,
     min_complexity: Option<u8>,
     max_complexity: Option<u8>,
+    kind: Option<crate::config::ModelKind>,
     reachable: bool,
     status_code: Option<u16>,
 }
@@ -77,9 +79,10 @@ pub async fn handle_chat_completion(
     let prompt = models::extract_user_prompt(&payload);
     let token_count = prompt.split_whitespace().count();
     let complexity_score = scorer::calculate_complexity(&prompt, token_count);
+    let code_prompt = scorer::looks_like_code(&prompt);
     let resources = hardware::get_current_resources();
     let local_pressure = hardware::has_local_resource_pressure(complexity_score, &resources);
-    let Some(model) = state.config.select_model(complexity_score) else {
+    let Some(model) = state.config.select_model(complexity_score, code_prompt) else {
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             "no local model routes configured".to_string(),
@@ -88,8 +91,13 @@ pub async fn handle_chat_completion(
     };
 
     println!(
-        "[AuraRoute] Score: {}, VRAM: {} MB, CPU: {:.1}%, pressure: {} -> Routing to {}",
-        complexity_score, resources.free_vram_mb, resources.cpu_usage_pct, local_pressure, model.name
+        "[AuraRoute] Score: {}, code: {}, VRAM: {} MB, CPU: {:.1}%, pressure: {} -> Routing to {}",
+        complexity_score,
+        code_prompt,
+        resources.free_vram_mb,
+        resources.cpu_usage_pct,
+        local_pressure,
+        model.name
     );
 
     let json_value = match serde_json::to_value(&payload) {
@@ -148,6 +156,7 @@ pub async fn handle_models(State(state): State<AppState>) -> impl IntoResponse {
             upstream: model.upstream,
             min_complexity: model.min_complexity,
             max_complexity: model.max_complexity,
+            kind: model.kind,
             reachable: model.reachable,
             status_code: model.status_code,
         })
@@ -169,6 +178,7 @@ async fn probe_models(state: &AppState) -> Vec<ModelHealth> {
             upstream: model.upstream.clone(),
             min_complexity: model.min_complexity,
             max_complexity: model.max_complexity,
+            kind: model.kind,
             reachable: probe.reachable,
             status_code: probe.status_code,
             error: probe.error,

@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use axum::routing::get;
 use axum::Router;
 use auraroute::app::{build_app, AppState};
-use auraroute::config::{AppConfig, ModelRoute};
+use auraroute::config::{AppConfig, ModelKind, ModelRoute};
 use reqwest::Client;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -40,6 +40,7 @@ async fn health_and_models_report_reachable_local_routes() -> Result<(), Box<dyn
         models: vec![ModelRoute {
             name: "fast".to_string(),
             upstream: format!("http://{upstream_addr}/v1/chat/completions"),
+            kind: Some(ModelKind::Fast),
             min_complexity: None,
             max_complexity: Some(2),
         }],
