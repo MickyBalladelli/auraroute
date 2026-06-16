@@ -1,0 +1,11 @@
+listen = "127.0.0.1:8080"
+
+[[models]]
+name = "fast"
+upstream = "http://localhost:11434/v1/chat/completions"
+max_complexity = 2
+
+[[models]]
+name = "deep"
+upstream = "http://localhost:11435/v1/chat/completions"
+min_complexity = 3

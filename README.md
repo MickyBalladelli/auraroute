@@ -66,7 +66,29 @@ Local upstream is configured with an environment variable:
 AURAROUTE_LOCAL_UPSTREAM=http://localhost:11434/v1/chat/completions
 ```
 
-If unset, AuraRoute uses `http://localhost:11434/v1/chat/completions`.
+Or with `auraroute.toml`:
+
+```toml
+listen = "127.0.0.1:8080"
+
+[[models]]
+name = "fast"
+upstream = "http://localhost:11434/v1/chat/completions"
+max_complexity = 2
+
+[[models]]
+name = "deep"
+upstream = "http://localhost:11435/v1/chat/completions"
+min_complexity = 3
+```
+
+Config path override:
+
+```bash
+AURAROUTE_CONFIG=/path/to/auraroute.toml cargo run
+```
+
+`AURAROUTE_LISTEN` overrides `listen`. `AURAROUTE_LOCAL_UPSTREAM` overrides the first configured model upstream.
 
 Resource mock override:
 

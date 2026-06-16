@@ -24,10 +24,17 @@ pub async fn handle_chat_completion(
     let complexity_score = scorer::calculate_complexity(&prompt, token_count);
     let resources = hardware::get_current_resources();
     let local_pressure = hardware::has_local_resource_pressure(complexity_score, &resources);
+    let Some(model) = state.config.select_model(complexity_score) else {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "no local model routes configured".to_string(),
+        )
+            .into_response();
+    };
 
     println!(
-        "[AuraRoute] Score: {}, VRAM: {} MB, CPU: {:.1}%, pressure: {} -> Routing to Local",
-        complexity_score, resources.free_vram_mb, resources.cpu_usage_pct, local_pressure
+        "[AuraRoute] Score: {}, VRAM: {} MB, CPU: {:.1}%, pressure: {} -> Routing to {}",
+        complexity_score, resources.free_vram_mb, resources.cpu_usage_pct, local_pressure, model.name
     );
 
     let json_value = match serde_json::to_value(&payload) {
@@ -41,7 +48,7 @@ pub async fn handle_chat_completion(
         }
     };
 
-    match proxy::proxy_stream_to_client(&state.client, &state.config.local_upstream, json_value).await {
+    match proxy::proxy_stream_to_client(&state.client, &model.upstream, json_value).await {
         Ok(stream) => stream.into_response(),
         Err(error) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -54,16 +61,20 @@ pub async fn handle_chat_completion(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let client = Client::new();
-    let config = AppConfig::from_env();
-    println!("[AuraRoute] Local upstream: {}", config.local_upstream);
+    let config = AppConfig::load()?;
+    println!("[AuraRoute] Configured {} local model(s)", config.models.len());
+    for model in &config.models {
+        println!("[AuraRoute] Model '{}': {}", model.name, model.upstream);
+    }
+    let listen = config.listen.clone();
 
     let app = Router::new()
         .route("/v1/chat/completions", post(handle_chat_completion))
         .with_state(AppState { client, config })
         .layer(CorsLayer::permissive());
 
-    let listener = TcpListener::bind("127.0.0.1:8080").await?;
-    println!("[AuraRoute] Listening on http://127.0.0.1:8080");
+    let listener = TcpListener::bind(&listen).await?;
+    println!("[AuraRoute] Listening on http://{listen}");
 
     axum::serve(listener, app).await?;
 
