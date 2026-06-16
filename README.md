@@ -120,6 +120,15 @@ Chat completions endpoint:
 POST /v1/chat/completions
 ```
 
+Health and model discovery:
+
+```text
+GET /health
+GET /v1/models
+```
+
+`/health` probes each configured local upstream and reports `ok` or `degraded`. `/v1/models` returns the configured local model routes in an OpenAI-style list shape with reachability details.
+
 ## Tests
 
 ```bash

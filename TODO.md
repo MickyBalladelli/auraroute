@@ -10,8 +10,6 @@ large reasoning model
 Add real tokenizer support in main path
 Current main uses whitespace count. Wire back tokenizers so scoring is less cave math.
 
-Add health checks
-/health and /v1/models, so Cline and humans can see what AuraRoute can reach.
 
 Add more tests
 Test bad upstream, interrupted stream, invalid JSON, and routing decisions.

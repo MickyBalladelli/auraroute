@@ -2,13 +2,13 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 const DEFAULT_CONFIG_PATH: &str = "auraroute.toml";
 const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
 const DEFAULT_LOCAL_UPSTREAM: &str = "http://localhost:11434/v1/chat/completions";
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AppConfig {
     #[serde(default = "default_listen")]
     pub listen: String,
@@ -16,7 +16,7 @@ pub struct AppConfig {
     pub models: Vec<ModelRoute>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ModelRoute {
     pub name: String,
     pub upstream: String,
