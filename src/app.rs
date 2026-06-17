@@ -1,5 +1,6 @@
-use std::time::Duration;
+use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::extract::{Json, State};
 use axum::http::StatusCode;
@@ -10,6 +11,7 @@ use reqwest::Client;
 use serde::Serialize;
 use tokenizers::Tokenizer;
 use tower_http::cors::CorsLayer;
+use tracing::{debug, error, info, warn};
 
 use crate::config::AppConfig;
 use crate::{hardware, models, proxy, scorer};
@@ -86,6 +88,7 @@ pub async fn handle_chat_completion(
     let resources = hardware::get_current_resources();
     let local_pressure = hardware::has_local_resource_pressure(complexity_score, &resources);
     let Some(model) = state.config.select_model(complexity_score, code_prompt) else {
+        error!("No local model routes configured");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             "no local model routes configured".to_string(),
@@ -93,19 +96,20 @@ pub async fn handle_chat_completion(
             .into_response();
     };
 
-    println!(
-        "[AuraRoute] Score: {}, code: {}, VRAM: {} MB, CPU: {:.1}%, pressure: {} -> Routing to {}",
-        complexity_score,
-        code_prompt,
-        resources.free_vram_mb,
-        resources.cpu_usage_pct,
-        local_pressure,
-        model.name
+    info!(
+        score = complexity_score,
+        code = code_prompt,
+        vram_mb = resources.free_vram_mb,
+        cpu_pct = resources.cpu_usage_pct,
+        pressure = local_pressure,
+        model = %model.name,
+        "routing request"
     );
 
     let json_value = match serde_json::to_value(&payload) {
         Ok(value) => value,
         Err(error) => {
+            error!(%error, "failed to serialize chat completion payload");
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("failed to serialize chat completion payload: {error}"),
@@ -115,12 +119,25 @@ pub async fn handle_chat_completion(
     };
 
     match proxy::proxy_stream_to_client(&state.client, &model.upstream, json_value).await {
-        Ok(stream) => stream.into_response(),
-        Err(error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("upstream proxy error: {error}"),
-        )
-            .into_response(),
+        Ok((stream, upstream_headers)) => {
+            let mut response = stream.into_response();
+            let response_headers = response.headers_mut();
+            for (key, value) in upstream_headers.iter() {
+                let key_lower = key.as_str().to_ascii_lowercase();
+                // Skip hop-by-hop headers since SSE uses chunked encoding
+                if !matches!(
+                    key_lower.as_str(),
+                    "transfer-encoding" | "connection" | "keep-alive"
+                ) {
+                    response_headers.insert(key.clone(), value.clone());
+                }
+            }
+            response
+        }
+        Err(error) => {
+            error!(%error, "upstream proxy error");
+            (StatusCode::BAD_GATEWAY, error).into_response()
+        }
     }
 }
 
@@ -140,7 +157,7 @@ fn count_tokens(prompt: &str, tokenizer: Option<&Tokenizer>) -> usize {
         match tokenizer.encode(prompt, true) {
             Ok(encoding) => return encoding.len(),
             Err(error) => {
-                eprintln!("[AuraRoute] tokenizer failed, using whitespace token count: {error}");
+                warn!(%error, "tokenizer failed, falling back to whitespace token count");
             }
         }
     }
@@ -199,7 +216,7 @@ async fn probe_models(state: &AppState) -> Vec<ModelHealth> {
     let mut models = Vec::with_capacity(state.config.models.len());
 
     for model in &state.config.models {
-        let probe = probe_upstream(&state.client, &model.upstream).await;
+        let probe = probe_upstream(&state.client, model.health_url()).await;
         models.push(ModelHealth {
             name: model.name.clone(),
             upstream: model.upstream.clone(),
@@ -221,26 +238,53 @@ struct ProbeResult {
     error: Option<String>,
 }
 
-async fn probe_upstream(client: &Client, upstream: &str) -> ProbeResult {
-    let result = client
-        .get(upstream)
-        .timeout(Duration::from_secs(2))
-        .send()
-        .await;
-
-    match result {
-        Ok(response) => {
-            let status = response.status();
-            ProbeResult {
-                reachable: true,
-                status_code: Some(status.as_u16()),
-                error: None,
-            }
-        }
+/// Probes an upstream URL by sending an OPTIONS request.
+/// Falls back to a GET if OPTIONS is not supported (405).
+/// If the user configured a specific `health_url` per model, that endpoint
+/// is probed directly.
+async fn probe_upstream(client: &Client, url: &str) -> ProbeResult {
+    match try_probe(client, url).await {
+        Ok(status) => ProbeResult {
+            reachable: true,
+            status_code: Some(status.as_u16()),
+            error: None,
+        },
         Err(error) => ProbeResult {
             reachable: false,
-            status_code: error.status().map(|status| status.as_u16()),
+            status_code: error.status().map(|s| s.as_u16()),
             error: Some(error.to_string()),
         },
     }
+}
+
+async fn try_probe(client: &Client, url: &str) -> reqwest::Result<reqwest::StatusCode> {
+    debug!(%url, "probing upstream");
+
+    // Try OPTIONS first — most HTTP servers respond without side effects
+    let response = client
+        .request(reqwest::Method::OPTIONS, url)
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await?;
+
+    if response.status() != reqwest::StatusCode::METHOD_NOT_ALLOWED {
+        debug!(%url, status = %response.status().as_u16(), "upstream reachable via OPTIONS");
+        return Ok(response.status());
+    }
+
+    // Fall back to GET for servers that don't support OPTIONS
+    let response = client
+        .get(url)
+        .timeout(Duration::from_secs(2))
+        .send()
+        .await?;
+
+    debug!(%url, status = %response.status().as_u16(), "upstream reachable via GET");
+    Ok(response.status())
+}
+
+/// Returns the local address the router is bound to.
+/// Useful for startup messages and shutdown notifications.
+pub fn bound_address(listen: &str) -> Option<SocketAddr> {
+    listen.parse().ok()
 }

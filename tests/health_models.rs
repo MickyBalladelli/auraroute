@@ -30,25 +30,29 @@ async fn spawn_server(app: Router) -> Result<(SocketAddr, JoinHandle<()>), std::
 }
 
 #[tokio::test]
-async fn health_and_models_report_reachable_local_routes() -> Result<(), Box<dyn std::error::Error>> {
+async fn health_and_models_report_reachable_local_routes() -> Result<(), Box<dyn std::error::Error>>
+{
     let upstream_app = Router::new()
         .route("/v1/chat/completions", get(ok_probe).post(mock_chat));
     let (upstream_addr, upstream_handle) = spawn_server(upstream_app).await?;
 
     let config = AppConfig {
         listen: "127.0.0.1:0".to_string(),
+        tokenizer_path: None,
         models: vec![ModelRoute {
             name: "fast".to_string(),
             upstream: format!("http://{upstream_addr}/v1/chat/completions"),
             kind: Some(ModelKind::Fast),
             min_complexity: None,
             max_complexity: Some(2),
+            health_url: None,
         }],
     };
 
     let app = build_app(AppState {
         client: Client::new(),
         config,
+        tokenizer: None,
     });
     let (app_addr, app_handle) = spawn_server(app).await?;
 

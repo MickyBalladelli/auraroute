@@ -29,7 +29,7 @@ async fn proxy_handler(
     Json(payload): Json<Value>,
 ) -> impl IntoResponse {
     match proxy_stream_to_client(&state.client, &state.upstream_url, payload).await {
-        Ok(stream) => stream.into_response(),
+        Ok((stream, _upstream_headers)) => stream.into_response(),
         Err(error) => (StatusCode::BAD_GATEWAY, error).into_response(),
     }
 }

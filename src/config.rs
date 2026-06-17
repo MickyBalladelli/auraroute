@@ -3,12 +3,16 @@ use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 const DEFAULT_CONFIG_PATH: &str = "auraroute.toml";
 const DEFAULT_LISTEN: &str = "127.0.0.1:8080";
-const DEFAULT_LOCAL_UPSTREAM: &str = "http://localhost:11434/v1/chat/completions";
+const DEFAULT_FAST_UPSTREAM: &str = "http://localhost:11434/v1/chat/completions";
+const DEFAULT_CODE_UPSTREAM: &str = "http://localhost:11435/v1/chat/completions";
+const DEFAULT_REASONING_UPSTREAM: &str = "http://localhost:11436/v1/chat/completions";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AppConfig {
     #[serde(default = "default_listen")]
     pub listen: String,
@@ -19,6 +23,7 @@ pub struct AppConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ModelRoute {
     pub name: String,
     pub upstream: String,
@@ -26,6 +31,8 @@ pub struct ModelRoute {
     pub kind: Option<ModelKind>,
     pub min_complexity: Option<u8>,
     pub max_complexity: Option<u8>,
+    #[serde(default)]
+    pub health_url: Option<String>,
 }
 
 impl AppConfig {
@@ -97,13 +104,17 @@ impl AppConfig {
         }
     }
 
-    fn validate(&self) -> Result<(), ConfigError> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         if self.listen.trim().is_empty() {
-            return Err(ConfigError::Invalid("listen address cannot be empty".to_string()));
+            return Err(ConfigError::Invalid(
+                "listen address cannot be empty".to_string(),
+            ));
         }
 
         if self.models.is_empty() {
-            return Err(ConfigError::Invalid("at least one local model route is required".to_string()));
+            return Err(ConfigError::Invalid(
+                "at least one local model route is required".to_string(),
+            ));
         }
 
         for model in &self.models {
@@ -164,53 +175,40 @@ impl ModelRoute {
             }
         }
 
+        if self.kind.is_none() {
+            return Err(ConfigError::Invalid(format!(
+                "model '{}' must have an explicit 'kind' (fast, code, or reasoning)",
+                self.name
+            )));
+        }
+
         Ok(())
     }
 
     fn matches_kind(&self, kind: ModelKind) -> bool {
-        if self.kind == Some(kind) {
-            return true;
-        }
+        self.kind == Some(kind)
+    }
 
-        let name = self.name.to_ascii_lowercase();
-        match kind {
-            ModelKind::Fast => name.contains("fast") || name.contains("small"),
-            ModelKind::Code => name.contains("code") || name.contains("coder"),
-            ModelKind::Reasoning => {
-                name.contains("reason") || name.contains("deep") || name.contains("large")
-            }
-        }
+    pub fn health_url(&self) -> &str {
+        self.health_url.as_deref().unwrap_or(&self.upstream)
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Error)]
 pub enum ConfigError {
+    #[error("failed to read config '{path}': {source}")]
     Read {
         path: String,
         source: std::io::Error,
     },
+    #[error("failed to parse config '{path}': {source}")]
     Parse {
         path: String,
         source: toml::de::Error,
     },
+    #[error("invalid config: {0}")]
     Invalid(String),
 }
-
-impl std::fmt::Display for ConfigError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ConfigError::Read { path, source } => {
-                write!(formatter, "failed to read config '{path}': {source}")
-            }
-            ConfigError::Parse { path, source } => {
-                write!(formatter, "failed to parse config '{path}': {source}")
-            }
-            ConfigError::Invalid(message) => write!(formatter, "invalid config: {message}"),
-        }
-    }
-}
-
-impl std::error::Error for ConfigError {}
 
 fn default_listen() -> String {
     DEFAULT_LISTEN.to_string()
@@ -220,24 +218,27 @@ fn default_models() -> Vec<ModelRoute> {
     vec![
         ModelRoute {
             name: "fast".to_string(),
-            upstream: DEFAULT_LOCAL_UPSTREAM.to_string(),
+            upstream: DEFAULT_FAST_UPSTREAM.to_string(),
             kind: Some(ModelKind::Fast),
             min_complexity: None,
             max_complexity: Some(2),
+            health_url: None,
         },
         ModelRoute {
             name: "code".to_string(),
-            upstream: DEFAULT_LOCAL_UPSTREAM.to_string(),
+            upstream: DEFAULT_CODE_UPSTREAM.to_string(),
             kind: Some(ModelKind::Code),
             min_complexity: None,
             max_complexity: None,
+            health_url: None,
         },
         ModelRoute {
             name: "reasoning".to_string(),
-            upstream: DEFAULT_LOCAL_UPSTREAM.to_string(),
+            upstream: DEFAULT_REASONING_UPSTREAM.to_string(),
             kind: Some(ModelKind::Reasoning),
             min_complexity: Some(3),
             max_complexity: None,
+            health_url: None,
         },
     ]
 }
