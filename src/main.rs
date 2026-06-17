@@ -1,4 +1,4 @@
-use auraroute::app::{build_app, AppState};
+use auraroute::app::{build_app, load_tokenizer, AppState};
 use auraroute::config::AppConfig;
 use reqwest::Client;
 use tokio::net::TcpListener;
@@ -11,9 +11,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     for model in &config.models {
         println!("[AuraRoute] Model '{}': {}", model.name, model.upstream);
     }
+    let tokenizer = load_tokenizer(&config)?;
+    if let Some(path) = config.tokenizer_path.as_deref() {
+        println!("[AuraRoute] Tokenizer: {path}");
+    } else {
+        println!("[AuraRoute] Tokenizer: whitespace fallback");
+    }
     let listen = config.listen.clone();
 
-    let app = build_app(AppState { client, config });
+    let app = build_app(AppState {
+        client,
+        config,
+        tokenizer,
+    });
 
     let listener = TcpListener::bind(&listen).await?;
     println!("[AuraRoute] Listening on http://{listen}");

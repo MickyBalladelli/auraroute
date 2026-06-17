@@ -12,6 +12,8 @@ const DEFAULT_LOCAL_UPSTREAM: &str = "http://localhost:11434/v1/chat/completions
 pub struct AppConfig {
     #[serde(default = "default_listen")]
     pub listen: String,
+    #[serde(default)]
+    pub tokenizer_path: Option<String>,
     #[serde(default = "default_models")]
     pub models: Vec<ModelRoute>,
 }
@@ -46,6 +48,7 @@ impl AppConfig {
 
         let mut config = Self {
             listen: default_listen(),
+            tokenizer_path: None,
             models: default_models(),
         };
         config.apply_env_overrides();
@@ -87,6 +90,10 @@ impl AppConfig {
             if let Some(model) = self.models.first_mut() {
                 model.upstream = upstream;
             }
+        }
+
+        if let Ok(tokenizer_path) = env::var("AURAROUTE_TOKENIZER_PATH") {
+            self.tokenizer_path = Some(tokenizer_path);
         }
     }
 

@@ -1,4 +1,5 @@
 use std::time::Duration;
+use std::sync::Arc;
 
 use axum::extract::{Json, State};
 use axum::http::StatusCode;
@@ -7,6 +8,7 @@ use axum::routing::{get, post};
 use axum::Router;
 use reqwest::Client;
 use serde::Serialize;
+use tokenizers::Tokenizer;
 use tower_http::cors::CorsLayer;
 
 use crate::config::AppConfig;
@@ -16,6 +18,7 @@ use crate::{hardware, models, proxy, scorer};
 pub struct AppState {
     pub client: Client,
     pub config: AppConfig,
+    pub tokenizer: Option<Arc<Tokenizer>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -77,7 +80,7 @@ pub async fn handle_chat_completion(
     Json(payload): Json<models::ChatCompletionRequest>,
 ) -> impl IntoResponse {
     let prompt = models::extract_user_prompt(&payload);
-    let token_count = prompt.split_whitespace().count();
+    let token_count = count_tokens(&prompt, state.tokenizer.as_deref());
     let complexity_score = scorer::calculate_complexity(&prompt, token_count);
     let code_prompt = scorer::looks_like_code(&prompt);
     let resources = hardware::get_current_resources();
@@ -119,6 +122,30 @@ pub async fn handle_chat_completion(
         )
             .into_response(),
     }
+}
+
+pub fn load_tokenizer(config: &AppConfig) -> Result<Option<Arc<Tokenizer>>, String> {
+    let Some(path) = config.tokenizer_path.as_deref() else {
+        return Ok(None);
+    };
+
+    Tokenizer::from_file(path)
+        .map(Arc::new)
+        .map(Some)
+        .map_err(|error| format!("failed to load tokenizer '{path}': {error}"))
+}
+
+fn count_tokens(prompt: &str, tokenizer: Option<&Tokenizer>) -> usize {
+    if let Some(tokenizer) = tokenizer {
+        match tokenizer.encode(prompt, true) {
+            Ok(encoding) => return encoding.len(),
+            Err(error) => {
+                eprintln!("[AuraRoute] tokenizer failed, using whitespace token count: {error}");
+            }
+        }
+    }
+
+    prompt.split_whitespace().count()
 }
 
 pub async fn handle_health(State(state): State<AppState>) -> impl IntoResponse {
